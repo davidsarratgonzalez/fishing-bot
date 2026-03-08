@@ -1,0 +1,78 @@
+import time
+import logging
+
+from .config import BotConfig
+from .audio import AudioMonitor
+from .input import find_wow_window, send_key
+
+logger = logging.getLogger(__name__)
+
+
+class FishingBot:
+    """Main fishing bot that ties audio detection and input together."""
+
+    def __init__(self, config: BotConfig | None = None):
+        self.config = config or BotConfig()
+        self.audio = AudioMonitor(self.config.process_name)
+        self.running = False
+        self._hwnd: int | None = None
+
+    def _find_wow(self) -> int:
+        """Locate the WoW window. Raises if not found."""
+        result = find_wow_window(self.config.process_name)
+        if result is None:
+            raise RuntimeError(
+                f"Could not find {self.config.process_name}. "
+                "Make sure World of Warcraft is running."
+            )
+        hwnd, pid = result
+        logger.info("Found %s (PID %d, HWND %d)", self.config.process_name, pid, hwnd)
+        return hwnd
+
+    def _cast(self) -> None:
+        """Cast the fishing rod."""
+        logger.info("Casting fishing rod [key=%s]", self.config.cast_key)
+        send_key(self._hwnd, self.config.cast_key)
+
+    def _loot(self) -> None:
+        """Loot the fish (interact with bobber)."""
+        logger.info("Fish detected! Looting [key=%s]", self.config.loot_key)
+        send_key(self._hwnd, self.config.loot_key)
+
+    def start(self) -> None:
+        """Start the fishing loop. Blocks until stopped or interrupted."""
+        self._hwnd = self._find_wow()
+        self.audio.ensure_unmuted()
+        self.running = True
+
+        logger.info("Bot started. Press Ctrl+C to stop.")
+        logger.info(
+            "Config: loot=%s, cast=%s, threshold=%.3f, cast_delay=%.1fs",
+            self.config.loot_key,
+            self.config.cast_key,
+            self.config.audio_threshold,
+            self.config.cast_delay,
+        )
+
+        # Initial cast
+        self._cast()
+
+        try:
+            while self.running:
+                peak = self.audio.get_peak_volume()
+
+                if peak >= self.config.audio_threshold:
+                    self._loot()
+                    # Wait for loot animation / pickup, then re-cast
+                    time.sleep(self.config.cast_delay)
+                    self._cast()
+
+                time.sleep(self.config.poll_interval)
+        except KeyboardInterrupt:
+            logger.info("Stopped by user.")
+        finally:
+            self.running = False
+
+    def stop(self) -> None:
+        """Signal the bot to stop."""
+        self.running = False

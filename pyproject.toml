@@ -1,0 +1,11 @@
+[project]
+name = "fishing-bot"
+version = "0.1.0"
+description = "WoW Fishing Bot"
+requires-python = ">=3.12"
+dependencies = [
+    "comtypes>=1.4.16",
+    "psutil>=7.2.2",
+    "pycaw>=20251023",
+    "pywin32>=311",
+]
