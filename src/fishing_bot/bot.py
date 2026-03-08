@@ -21,11 +21,12 @@ class FishingBot:
         self._hwnd: int | None = None
 
     def _humanize(self, base_delay: float) -> float:
-        """Add random jitter to a delay. Returns the actual sleep duration."""
+        """Add Gaussian jitter to a delay. Most values cluster near the base,
+        with rare outliers — mimicking human reaction time variance."""
         if self.config.humanize <= 0:
             return base_delay
-        jitter = base_delay * self.config.humanize
-        return max(0, base_delay + random.uniform(-jitter, jitter))
+        sigma = base_delay * self.config.humanize / 3  # 99.7% within ±humanize range
+        return max(0.05, base_delay + random.gauss(0, sigma))
 
     def _sleep(self, base_delay: float) -> None:
         """Sleep with optional humanized jitter."""
