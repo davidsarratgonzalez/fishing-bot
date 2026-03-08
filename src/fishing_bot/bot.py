@@ -37,15 +37,44 @@ class FishingBot:
     def _wait_for_silence(self) -> None:
         """Wait until audio drops below threshold (cast sound fades)."""
         logger.debug("Waiting for silence...")
-        # First wait a minimum for the cast animation to start
         time.sleep(0.5)
-        # Then drain any residual audio
         while self.running:
             peak = self.audio.get_peak_volume()
             if peak < self.config.audio_threshold:
                 break
             time.sleep(self.config.poll_interval)
         logger.debug("Silence detected, now listening for bites.")
+
+    def _detect_bite(self) -> bool:
+        """Wait for a confirmed fish bite or timeout.
+
+        Returns True if a bite was detected, False if the cast timed out.
+        """
+        cast_time = time.monotonic()
+        consecutive_hits = 0
+
+        while self.running:
+            elapsed = time.monotonic() - cast_time
+            if elapsed >= self.config.fishing_timeout:
+                logger.info("Fishing timeout (%.0fs) — no bite, re-casting.", elapsed)
+                return False
+
+            peak = self.audio.get_peak_volume()
+
+            if peak >= self.config.audio_threshold:
+                consecutive_hits += 1
+                if consecutive_hits >= self.config.confirm_polls:
+                    logger.debug(
+                        "Bite confirmed (%d consecutive peaks, last=%.4f)",
+                        consecutive_hits, peak,
+                    )
+                    return True
+            else:
+                consecutive_hits = 0
+
+            time.sleep(self.config.poll_interval)
+
+        return False
 
     def _find_wow(self) -> int:
         """Locate the WoW window. Raises if not found."""
@@ -84,32 +113,28 @@ class FishingBot:
 
         logger.info("Bot started. Press Ctrl+C to stop.")
         logger.info(
-            "Config: loot=%s, cast=%s, threshold=%.3f, loot_delay=%.1fs, "
-            "cast_delay=%.1fs, humanize=%.0f%%, silent=%s",
+            "Config: loot=%s, cast=%s, threshold=%.3f, confirm=%d, "
+            "loot_delay=%.1fs, timeout=%.0fs, humanize=%.0f%%, silent=%s",
             self.config.loot_key,
             self.config.cast_key,
             self.config.audio_threshold,
+            self.config.confirm_polls,
             self.config.loot_delay,
-            self.config.cast_delay,
+            self.config.fishing_timeout,
             self.config.humanize * 100,
             self.config.silent,
         )
 
-        # Initial cast
-        self._cast()
-        self._wait_for_silence()
-
         try:
             while self.running:
-                peak = self.audio.get_peak_volume()
+                self._cast()
+                self._wait_for_silence()
 
-                if peak >= self.config.audio_threshold:
+                if self._detect_bite():
                     self._loot()
                     self._sleep(self.config.loot_delay)
-                    self._cast()
-                    self._wait_for_silence()
+                # If timeout (no bite), loop re-casts automatically
 
-                time.sleep(self.config.poll_interval)
         except KeyboardInterrupt:
             logger.info("Stopped by user.")
         finally:
