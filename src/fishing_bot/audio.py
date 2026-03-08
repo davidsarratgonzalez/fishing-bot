@@ -46,3 +46,19 @@ class AudioMonitor:
                 volume.SetMute(False, None)
         except comtypes.COMError:
             pass
+
+    def set_muted(self, muted: bool) -> None:
+        """Mute or unmute WoW's audio output for the user.
+
+        The audio meter still reads peak values even when muted,
+        so the bot continues to detect fish bites silently.
+        """
+        try:
+            session = self._get_session()
+            if session is None:
+                return
+
+            volume = session._ctl.QueryInterface(ISimpleAudioVolume)
+            volume.SetMute(muted, None)
+        except comtypes.COMError:
+            pass
