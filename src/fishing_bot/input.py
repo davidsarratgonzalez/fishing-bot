@@ -13,6 +13,7 @@ VK_MAP: dict[str, int] = {
     "f5": 0x74, "f6": 0x75, "f7": 0x76, "f8": 0x77,
     "f9": 0x78, "f10": 0x79, "f11": 0x7A, "f12": 0x7B,
     "space": 0x20, "enter": 0x0D, "tab": 0x09, "escape": 0x1B,
+    "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
 }
 
 user32 = ctypes.windll.user32
@@ -73,4 +74,16 @@ def send_key(hwnd: int, key: str) -> None:
     """
     vk = _key_to_vk(key)
     PostMessageW(hwnd, WM_KEYDOWN, vk, 0)
+    PostMessageW(hwnd, WM_KEYUP, vk, 0)
+
+
+def key_down(hwnd: int, key: str) -> None:
+    """Hold a key down (no release). Use key_up() to release."""
+    vk = _key_to_vk(key)
+    PostMessageW(hwnd, WM_KEYDOWN, vk, 0)
+
+
+def key_up(hwnd: int, key: str) -> None:
+    """Release a held key."""
+    vk = _key_to_vk(key)
     PostMessageW(hwnd, WM_KEYUP, vk, 0)

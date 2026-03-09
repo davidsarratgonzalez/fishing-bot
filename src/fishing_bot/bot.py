@@ -7,6 +7,8 @@ import logging
 from .config import BotConfig
 from .audio import AudioMonitor
 from .input import find_wow_window, send_key
+from .pixel import PixelReader, calibrate_pixel_positions
+from .navigator import Navigator
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +21,8 @@ class FishingBot:
         self.audio = AudioMonitor(self.config.process_name)
         self.running = False
         self._hwnd: int | None = None
+        self._pixel_reader: PixelReader | None = None
+        self._nav_positions: list[tuple[int, int]] | None = None
 
     def _humanize(self, base_delay: float) -> float:
         """Add Gaussian jitter to a delay. Most values cluster near the base,
@@ -88,6 +92,32 @@ class FishingBot:
         logger.info("Found %s (PID %d, HWND %d)", self.config.process_name, pid, hwnd)
         return hwnd
 
+    def _init_pixel_reader(self) -> None:
+        """Initialize pixel reader and calibrate positions."""
+        self._pixel_reader = PixelReader(self._hwnd)
+        self._nav_positions = calibrate_pixel_positions(self._hwnd)
+
+    def _check_nav(self) -> bool:
+        """Check pixel 0 for NAV state. If detected, run navigation.
+
+        Returns True if nav was executed, False otherwise.
+        """
+        if not self._pixel_reader or not self._nav_positions:
+            return False
+
+        state = self._pixel_reader.read_state()
+        if state != "NAV":
+            return False
+
+        logger.info("NAV state detected on pixel 0 — entering navigation mode.")
+        nav = Navigator(self._hwnd, self._pixel_reader, self._nav_positions)
+        success = nav.navigate()
+        if success:
+            logger.info("Navigation complete — resuming fishing.")
+        else:
+            logger.warning("Navigation aborted.")
+        return True
+
     def _cast(self) -> None:
         """Cast the fishing rod."""
         logger.info("Casting fishing rod [key=%s]", self.config.cast_key)
@@ -101,6 +131,7 @@ class FishingBot:
     def start(self) -> None:
         """Start the fishing loop. Blocks until stopped or interrupted."""
         self._hwnd = self._find_wow()
+        self._init_pixel_reader()
         self.audio.ensure_unmuted()
         self.running = True
 
@@ -127,6 +158,9 @@ class FishingBot:
 
         try:
             while self.running:
+                # Check if addon requests navigation before each cast
+                self._check_nav()
+
                 self._cast()
                 self._wait_for_silence()
 
