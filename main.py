@@ -17,7 +17,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--confirm-polls", type=int, default=2, help="Consecutive peaks needed to confirm a bite (default: 2)")
     parser.add_argument("--loot-delay", type=float, default=0.5, help="Seconds after looting before re-casting (default: 0.5)")
     parser.add_argument("--poll-interval", type=float, default=0.1, help="Seconds between audio checks (default: 0.1)")
-    parser.add_argument("--fishing-timeout", type=float, default=22.0, help="Max seconds to wait for a bite before re-casting (default: 22)")
     parser.add_argument("--process", default="Wow.exe", help="WoW process name (default: Wow.exe)")
     parser.add_argument("--silent", action="store_true", help="Mute WoW audio for you (bot still detects fish)")
     parser.add_argument("--humanize", type=float, default=0.0, help="Random jitter on delays, 0.0-1.0 (default: 0.0, recommended: 0.3)")
@@ -41,7 +40,6 @@ def main() -> None:
         confirm_polls=args.confirm_polls,
         loot_delay=args.loot_delay,
         poll_interval=args.poll_interval,
-        fishing_timeout=args.fishing_timeout,
         process_name=args.process,
         silent=args.silent,
         humanize=args.humanize,
