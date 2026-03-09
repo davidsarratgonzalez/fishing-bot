@@ -139,6 +139,47 @@ class FishingBot:
 
             time.sleep(self.config.poll_interval)
 
+    def _handle_sell(self) -> None:
+        """Handle sell sequence — addon controls macro, bot presses keys."""
+        logger.info("SELL sequence started...")
+
+        while self.running:
+            state = self._read_state()
+
+            if state == "SELL_ACTION":
+                # Addon set the macro — press cast key
+                self._sleep(0.5)
+                logger.info("Sell: pressing cast key (macro action)")
+                send_key(self._hwnd, self.config.cast_key)
+                # Wait for state to change (addon advances step)
+                self._wait_for_not_state("SELL_ACTION", timeout=10.0)
+
+            elif state == "SELL_INTERACT":
+                # Need to press interact key to open vendor
+                self._sleep(0.5)
+                logger.info("Sell: pressing interact key")
+                send_key(self._hwnd, self.config.loot_key)
+                # Wait for state to change
+                self._wait_for_not_state("SELL_INTERACT", timeout=10.0)
+
+            elif state == "SELL_WAIT":
+                # Addon is processing, just wait
+                time.sleep(0.5)
+
+            elif state == "IDLE":
+                logger.info("Sell sequence complete — resuming fishing.")
+                return
+
+            elif state == "NAV":
+                # Sell triggered nav back to fishing spot
+                self._run_nav()
+                return
+
+            else:
+                # Unexpected state during sell
+                logger.debug("Sell: unexpected state %s, waiting...", state)
+                time.sleep(0.5)
+
     def _handle_treasure(self) -> None:
         """Spin to find treasure → interact → wait for nav back."""
         logger.info("TREASURE SPAWNED — spinning to find it...")
@@ -222,6 +263,9 @@ class FishingBot:
 
                 elif state == "TREASURE_SPAWN":
                     self._handle_treasure()
+
+                elif state in ("SELL_ACTION", "SELL_INTERACT", "SELL_WAIT"):
+                    self._handle_sell()
 
                 else:
                     # TREASURE_TARGET, SPIRIT_SPAWN, CRAB_SPAWN, unknown

@@ -141,6 +141,9 @@ _STATE_COLORS = {
     "TREASURE_TARGET": (255, 255, 0),
     "SPIRIT_SPAWN":    (255, 0, 0),
     "CRAB_SPAWN":      (255, 128, 0),
+    "SELL_ACTION":     (128, 0, 255),
+    "SELL_INTERACT":   (128, 255, 0),
+    "SELL_WAIT":       (128, 128, 0),
 }
 
 TOLERANCE = 30  # Color matching tolerance per channel
