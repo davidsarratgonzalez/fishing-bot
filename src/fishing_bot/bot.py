@@ -139,6 +139,13 @@ class FishingBot:
 
             time.sleep(self.config.poll_interval)
 
+    def _handle_lure(self) -> None:
+        """Addon wants us to press cast key to apply a lure via macro."""
+        logger.info("Applying lure [key=%s]", self.config.cast_key)
+        send_key(self._hwnd, self.config.cast_key)
+        # Addon resets macro and goes IDLE after ~2s
+        self._wait_for_not_state("LURE", timeout=5.0)
+
     def _handle_sell(self) -> None:
         """Handle sell sequence — addon controls macro, bot presses keys."""
         logger.info("SELL sequence started...")
@@ -183,42 +190,58 @@ class FishingBot:
         logger.warning("Sell: global timeout (60s) — returning to main loop.")
 
     def _handle_treasure(self) -> None:
-        """Spin to find treasure → interact → wait for nav back."""
+        """Spin to find treasure → interact → wait for nav back.
+
+        Phase 1 (TREASURE_SPAWN): hold left-turn while addon scans for
+          soft-interact target. Addon sets TREASURE_TARGET when found,
+          or IDLE on 3-min timeout.
+        Phase 2 (TREASURE_TARGET): stop spinning, spam interact key.
+          With autoInteract + click-to-move, this walks to and loots the chest.
+        """
         logger.info("TREASURE SPAWNED — spinning to find it...")
 
+        # Phase 1: spin while addon scans soft-interact
         key_down(self._hwnd, "left")
         try:
             start = time.monotonic()
-            while self.running and time.monotonic() - start < 30:
+            while self.running and time.monotonic() - start < 200:
                 state = self._read_state()
+
                 if state == "TREASURE_TARGET":
                     break
-                if state not in ("TREASURE_SPAWN", "FISHING", None):
-                    logger.warning("State changed to %s during spin, aborting.", state)
+
+                if state in ("IDLE", "NAV"):
+                    logger.info("Treasure: addon changed to %s, stopping spin.", state)
+                    if state == "NAV":
+                        key_up(self._hwnd, "left")
+                        self._run_nav()
                     return
+
                 time.sleep(0.1)
             else:
-                logger.warning("Treasure spin timeout — not found.")
+                logger.warning("Treasure spin timeout — addon should reset.")
                 return
         finally:
             key_up(self._hwnd, "left")
 
+        # Phase 2: treasure found — spam interact
         logger.info("TREASURE TARGETED — pressing interact...")
-        time.sleep(0.3)
-        send_key(self._hwnd, self.config.loot_key)
-
-        # Wait for addon to set NAV (after loot) or IDLE
-        logger.info("Waiting for treasure loot...")
         start = time.monotonic()
-        while self.running and time.monotonic() - start < 45:
+        while self.running and time.monotonic() - start < 60:
             state = self._read_state()
+
             if state == "NAV":
                 self._run_nav()
                 return
             if state == "IDLE":
+                logger.info("Treasure sequence complete.")
                 return
-            time.sleep(0.5)
-        logger.warning("Treasure wait timeout.")
+
+            # Keep pressing interact (click-to-move walks + loots)
+            send_key(self._hwnd, self.config.loot_key)
+            time.sleep(0.8)
+
+        logger.warning("Treasure interact timeout (60s).")
 
     # ------------------------------------------------------------------
     # Main loop — pure state machine
@@ -265,6 +288,9 @@ class FishingBot:
 
                 elif state == "TREASURE_SPAWN":
                     self._handle_treasure()
+
+                elif state == "LURE":
+                    self._handle_lure()
 
                 elif state in ("SELL_ACTION", "SELL_INTERACT", "SELL_WAIT"):
                     self._handle_sell()
