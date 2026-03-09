@@ -38,30 +38,44 @@ class FishingBot:
         logger.debug("Sleeping %.2fs (base=%.2f)", actual, base_delay)
         time.sleep(actual)
 
-    def _wait_for_silence(self) -> None:
-        """Wait until audio drops below threshold (cast sound fades)."""
+    def _wait_for_silence(self) -> bool:
+        """Wait until audio drops below threshold (cast sound fades).
+
+        Returns False if interrupted by NAV request.
+        """
         logger.debug("Waiting for silence...")
         time.sleep(0.5)
         while self.running:
+            if self._is_nav_requested():
+                return False
             peak = self.audio.get_peak_volume()
             if peak < self.config.audio_threshold:
                 break
             time.sleep(self.config.poll_interval)
         logger.debug("Silence detected, now listening for bites.")
+        return True
 
-    def _detect_bite(self) -> bool:
+    def _detect_bite(self) -> bool | None:
         """Wait for a confirmed fish bite or timeout.
 
-        Returns True if a bite was detected, False if the cast timed out.
+        Returns True if bite detected, False if timeout, None if NAV interrupted.
         """
         cast_time = time.monotonic()
         consecutive_hits = 0
+        last_nav_check = time.monotonic()
 
         while self.running:
-            elapsed = time.monotonic() - cast_time
+            now = time.monotonic()
+            elapsed = now - cast_time
             if elapsed >= self.config.fishing_timeout:
                 logger.info("Fishing timeout (%.0fs) — no bite, re-casting.", elapsed)
                 return False
+
+            # Check for NAV every ~1 second during bite detection
+            if now - last_nav_check >= 1.0:
+                if self._is_nav_requested():
+                    return None
+                last_nav_check = now
 
             peak = self.audio.get_peak_volume()
 
@@ -94,29 +108,25 @@ class FishingBot:
 
     def _init_pixel_reader(self) -> None:
         """Initialize pixel reader and calibrate positions."""
-        self._pixel_reader = PixelReader(self._hwnd)
         self._nav_positions = calibrate_pixel_positions(self._hwnd)
+        p0 = self._nav_positions[0]
+        self._pixel_reader = PixelReader(self._hwnd, x=p0[0], y=p0[1])
 
-    def _check_nav(self) -> bool:
-        """Check pixel 0 for NAV state. If detected, run navigation.
-
-        Returns True if nav was executed, False otherwise.
-        """
-        if not self._pixel_reader or not self._nav_positions:
+    def _is_nav_requested(self) -> bool:
+        """Quick check: is pixel 0 showing NAV state?"""
+        if not self._pixel_reader:
             return False
+        return self._pixel_reader.read_state() == "NAV"
 
-        state = self._pixel_reader.read_state()
-        if state != "NAV":
-            return False
-
-        logger.info("NAV state detected on pixel 0 — entering navigation mode.")
+    def _run_nav(self) -> None:
+        """Execute navigation routine."""
+        logger.info("NAV state detected — entering navigation mode.")
         nav = Navigator(self._hwnd, self._pixel_reader, self._nav_positions)
         success = nav.navigate()
         if success:
             logger.info("Navigation complete — resuming fishing.")
         else:
             logger.warning("Navigation aborted.")
-        return True
 
     def _cast(self) -> None:
         """Cast the fishing rod."""
@@ -158,13 +168,23 @@ class FishingBot:
 
         try:
             while self.running:
-                # Check if addon requests navigation before each cast
-                self._check_nav()
+                # Check for NAV before casting
+                if self._is_nav_requested():
+                    self._run_nav()
+                    continue
 
                 self._cast()
-                self._wait_for_silence()
 
-                if self._detect_bite():
+                if not self._wait_for_silence():
+                    self._run_nav()
+                    continue
+
+                bite = self._detect_bite()
+                if bite is None:
+                    # NAV interrupted fishing — navigate then re-cast
+                    self._run_nav()
+                    continue
+                if bite:
                     self._loot()
                     self._sleep(self.config.loot_delay)
                 # If timeout (no bite), loop re-casts automatically
