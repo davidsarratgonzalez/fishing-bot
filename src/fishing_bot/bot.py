@@ -142,17 +142,16 @@ class FishingBot:
     def _handle_sell(self) -> None:
         """Handle sell sequence — addon controls macro, bot presses keys."""
         logger.info("SELL sequence started...")
+        sell_start = time.monotonic()
 
-        while self.running:
+        while self.running and time.monotonic() - sell_start < 60:
             state = self._read_state()
 
             if state == "SELL_ACTION":
-                # Addon set the macro — press cast key
-                self._sleep(0.5)
+                # Addon set the macro — press cast key, retry every 0.5s
                 logger.info("Sell: pressing cast key (macro action)")
                 send_key(self._hwnd, self.config.cast_key)
-                # Wait for state to change (addon advances step)
-                self._wait_for_not_state("SELL_ACTION", timeout=10.0)
+                time.sleep(0.5)
 
             elif state == "SELL_INTERACT":
                 # Need to press interact key to open vendor
@@ -176,9 +175,12 @@ class FishingBot:
                 return
 
             else:
-                # Unexpected state during sell
-                logger.debug("Sell: unexpected state %s, waiting...", state)
-                time.sleep(0.5)
+                # Unexpected state during sell — addon probably aborted
+                logger.warning("Sell: unexpected state %s, exiting sell handler.", state)
+                return
+
+        # 60s global timeout
+        logger.warning("Sell: global timeout (60s) — returning to main loop.")
 
     def _handle_treasure(self) -> None:
         """Spin to find treasure → interact → wait for nav back."""
