@@ -1,13 +1,15 @@
 import atexit
 import random
 import signal
+import threading
 import time
 import logging
+import winsound
 
 from .config import BotConfig
 from .audio import AudioMonitor
 from .input import find_wow_window, send_key, key_down, key_up
-from .pixel import PixelReader, calibrate_pixel_positions
+from .pixel import PixelReader, calibrate_pixel_positions, match_state
 from .navigator import Navigator
 
 logger = logging.getLogger(__name__)
@@ -189,59 +191,88 @@ class FishingBot:
         # 60s global timeout
         logger.warning("Sell: global timeout (60s) — returning to main loop.")
 
-    def _handle_treasure(self) -> None:
-        """Spin to find treasure → interact → wait for nav back.
+    def _play_treasure_alarm(self) -> None:
+        """Play a repeating alarm sound in a background thread."""
+        def _alarm():
+            for _ in range(6):
+                # 800Hz for 300ms, pause 200ms — classic alarm pattern
+                winsound.Beep(800, 300)
+                time.sleep(0.2)
+                winsound.Beep(1000, 300)
+                time.sleep(0.2)
+        threading.Thread(target=_alarm, daemon=True).start()
 
-        Phase 1 (TREASURE_SPAWN): hold left-turn while addon scans for
-          soft-interact target. Addon sets TREASURE_TARGET when found,
-          or IDLE on 3-min timeout.
-        Phase 2 (TREASURE_TARGET): stop spinning, spam interact key.
-          With autoInteract + click-to-move, this walks to and loots the chest.
+    def _read_all_pixels(self) -> tuple[str | None, int]:
+        """Read all nav pixels in one capture.
+
+        Returns (state, action) where state is from pixel 0 and
+        action is the G channel of pixel 1 (0=stop, 1=turn_left).
         """
-        logger.info("TREASURE SPAWNED — spinning to find it...")
+        pixels = self._pixel_reader.read_pixels(self._nav_positions)
+        state = None
+        if pixels[0]:
+            r, g, b = pixels[0]
+            state = match_state(r, g, b)
+        action = 0
+        if pixels[1]:
+            action = pixels[1][1]  # G channel = nav action
+        return state, action
 
-        # Phase 1: spin while addon scans soft-interact
-        key_down(self._hwnd, "left")
+    def _handle_treasure(self) -> None:
+        """Spin + spam interact to find and loot treasure.
+
+        Bot ALWAYS spams interact (F) every ~100ms during TREASURE_SPAWN.
+        Addon controls turning via nav pixel 1:
+          action=1 → hold left (spinning to scan)
+          action=0 → release left (treasure found, click-to-move walking)
+        Addon sets IDLE/NAV when treasure is looted or timed out.
+        """
+        logger.info("TREASURE SPAWNED — spinning + spamming interact...")
+        if self.config.treasure_alarm:
+            self._play_treasure_alarm()
+
+        holding_left = False
+        last_interact = 0.0
         try:
             start = time.monotonic()
             while self.running and time.monotonic() - start < 200:
-                state = self._read_state()
-
-                if state == "TREASURE_TARGET":
-                    break
+                state, action = self._read_all_pixels()
 
                 if state in ("IDLE", "NAV"):
-                    logger.info("Treasure: addon changed to %s, stopping spin.", state)
+                    logger.info("Treasure done (state=%s).", state)
                     if state == "NAV":
-                        key_up(self._hwnd, "left")
+                        if holding_left:
+                            key_up(self._hwnd, "left")
+                            holding_left = False
                         self._run_nav()
                     return
 
-                time.sleep(0.1)
-            else:
-                logger.warning("Treasure spin timeout — addon should reset.")
-                return
+                if state != "TREASURE_SPAWN":
+                    # Unexpected state — don't get stuck
+                    time.sleep(0.1)
+                    continue
+
+                # Turn control from addon
+                if action >= 1 and not holding_left:
+                    key_down(self._hwnd, "left")
+                    holding_left = True
+                elif action == 0 and holding_left:
+                    key_up(self._hwnd, "left")
+                    holding_left = False
+
+                # Spam interact every 50ms — catches treasure while spinning,
+                # triggers click-to-move, and loots when in range
+                now = time.monotonic()
+                if now - last_interact >= 0.05:
+                    send_key(self._hwnd, self.config.loot_key)
+                    last_interact = now
+
+                time.sleep(0.02)
+
+            logger.warning("Treasure global timeout (200s).")
         finally:
-            key_up(self._hwnd, "left")
-
-        # Phase 2: treasure found — spam interact
-        logger.info("TREASURE TARGETED — pressing interact...")
-        start = time.monotonic()
-        while self.running and time.monotonic() - start < 60:
-            state = self._read_state()
-
-            if state == "NAV":
-                self._run_nav()
-                return
-            if state == "IDLE":
-                logger.info("Treasure sequence complete.")
-                return
-
-            # Keep pressing interact (click-to-move walks + loots)
-            send_key(self._hwnd, self.config.loot_key)
-            time.sleep(0.8)
-
-        logger.warning("Treasure interact timeout (60s).")
+            if holding_left:
+                key_up(self._hwnd, "left")
 
     # ------------------------------------------------------------------
     # Main loop — pure state machine

@@ -128,7 +128,7 @@ class PixelReader:
             return None
 
         r, g, b = rgb
-        return _match_state(r, g, b)
+        return match_state(r, g, b)
 
 
 # State color map matching the addon's FA.PIXEL_COLORS
@@ -150,7 +150,7 @@ _STATE_COLORS = {
 TOLERANCE = 30  # Color matching tolerance per channel
 
 
-def _match_state(r: int, g: int, b: int) -> str | None:
+def match_state(r: int, g: int, b: int) -> str | None:
     """Match an RGB value to the closest known state."""
     for state, (sr, sg, sb) in _STATE_COLORS.items():
         if abs(r - sr) <= TOLERANCE and abs(g - sg) <= TOLERANCE and abs(b - sb) <= TOLERANCE:

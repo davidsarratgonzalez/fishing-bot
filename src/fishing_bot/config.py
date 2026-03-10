@@ -21,3 +21,5 @@ class BotConfig:
     silent: bool = False
     # Gaussian jitter on delays (0.0 = robotic, 0.3 = natural, 0.5 = erratic)
     humanize: float = 0.3
+    # Play alarm sound on treasure spawn
+    treasure_alarm: bool = False

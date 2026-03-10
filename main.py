@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--process", default="Wow.exe", help="WoW process name (default: Wow.exe)")
     parser.add_argument("--silent", action="store_true", help="Mute WoW audio for you (bot still detects fish)")
     parser.add_argument("--humanize", type=float, default=0.0, help="Random jitter on delays, 0.0-1.0 (default: 0.0, recommended: 0.3)")
+    parser.add_argument("--treasure-alarm", action="store_true", help="Play alarm sound when a treasure spawns")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
@@ -43,6 +44,7 @@ def main() -> None:
         process_name=args.process,
         silent=args.silent,
         humanize=args.humanize,
+        treasure_alarm=args.treasure_alarm,
     )
 
     bot = FishingBot(config)
