@@ -23,3 +23,9 @@ class BotConfig:
     humanize: float = 0.3
     # Play alarm sound on treasure spawn
     treasure_alarm: bool = False
+    # Anti-detection: chance (0.0-1.0) of random AFK pause per cast cycle
+    afk_chance: float = 0.01
+    # Anti-detection: AFK pause duration range in seconds (min, max)
+    afk_duration: tuple[float, float] = (30.0, 180.0)
+    # Anti-detection: chance (0.0-1.0) of random jump between casts
+    jump_chance: float = 0.03

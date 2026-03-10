@@ -103,6 +103,7 @@ class Navigator:
         Returns True if navigation completed, False if it was aborted.
         """
         logger.info("Navigator started — reading nav pixels...")
+        idle_count = 0
 
         try:
             while True:
@@ -115,10 +116,17 @@ class Navigator:
                 step, action, dist, angle_deg = nav
 
                 if step == STEP_IDLE:
-                    # Nav not started yet by addon
+                    idle_count += 1
+                    # If nav pixel stays IDLE for ~1s, addon finished nav
+                    if idle_count > 20:
+                        self._release_all()
+                        logger.info("Navigation complete (nav pixel idle).")
+                        return True
                     self._release_all()
                     time.sleep(NAV_POLL_INTERVAL)
                     continue
+                else:
+                    idle_count = 0
 
                 if step == STEP_DONE:
                     self._release_all()

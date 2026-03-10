@@ -145,6 +145,7 @@ _STATE_COLORS = {
     "SELL_INTERACT":   (128, 255, 0),
     "SELL_WAIT":       (128, 128, 0),
     "LURE":            (0, 128, 128),
+    "LOGOUT":          (128, 0, 128),
 }
 
 TOLERANCE = 30  # Color matching tolerance per channel

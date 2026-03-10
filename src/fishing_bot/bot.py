@@ -26,6 +26,7 @@ class FishingBot:
         self._pixel_reader: PixelReader | None = None
         self._nav_positions: list[tuple[int, int]] | None = None
         self._last_state: str | None = None
+        self._cast_count: int = 0
 
     def _humanize(self, base_delay: float) -> float:
         if self.config.humanize <= 0:
@@ -102,10 +103,64 @@ class FishingBot:
         success = nav.navigate()
         logger.info("Navigation %s.", "complete" if success else "aborted")
 
+    def _do_logout(self) -> None:
+        """Send /camp to log out (addon triggered LOGOUT pixel state)."""
+        logger.info("Addon requested logout — sending /camp...")
+        send_key(self._hwnd, "enter")
+        time.sleep(0.3)
+        # Type /camp and press enter
+        for ch in "/camp":
+            send_key(self._hwnd, ch)
+            time.sleep(0.03)
+        time.sleep(0.1)
+        send_key(self._hwnd, "enter")
+        logger.info("Logout command sent. Stopping bot in 25s...")
+        time.sleep(25)
+        self.running = False
+
+    def _maybe_afk_pause(self) -> None:
+        """Randomly take a human-like AFK break.
+
+        Uses squared random to bias toward shorter pauses:
+        most pauses ~30-60s, rarely up to 180s.
+        Interruptible: checks pixel state every second so treasure/logout
+        can preempt the pause.
+        """
+        if self.config.afk_chance <= 0:
+            return
+        if random.random() < self.config.afk_chance:
+            lo, hi = self.config.afk_duration
+            # random() ** 2 biases heavily toward 0 → short pauses much more common
+            duration = lo + (hi - lo) * (random.random() ** 2)
+            logger.info("AFK pause (%.0fs) — simulating human break...", duration)
+            end_time = time.monotonic() + duration
+            while self.running and time.monotonic() < end_time:
+                # Check if addon changed state (treasure, logout, etc.)
+                state = self._read_state()
+                if state != "IDLE":
+                    logger.info("AFK pause interrupted (state=%s).", state)
+                    return
+                time.sleep(1.0)
+            logger.info("AFK pause ended, resuming.")
+
+    def _maybe_jump(self) -> None:
+        """Randomly jump like a bored human."""
+        if self.config.jump_chance <= 0:
+            return
+        if random.random() < self.config.jump_chance:
+            logger.debug("Random jump.")
+            send_key(self._hwnd, "space")
+            time.sleep(random.uniform(0.9, 1.2))  # wait to land before casting
+
     def _handle_idle(self) -> None:
         """Cast and wait for FISHING state."""
+        # Anti-detection: random AFK pause or jump between casts
+        self._maybe_afk_pause()
+        self._maybe_jump()
+
+        self._cast_count += 1
         self._sleep(0.7)  # natural pause before re-casting (0.5-0.9s range)
-        logger.info("Casting [key=%s]", self.config.cast_key)
+        logger.info("Casting #%d [key=%s]", self._cast_count, self.config.cast_key)
         send_key(self._hwnd, self.config.cast_key)
 
         # Wait for addon to confirm fishing channel started
@@ -206,7 +261,7 @@ class FishingBot:
         """Read all nav pixels in one capture.
 
         Returns (state, action) where state is from pixel 0 and
-        action is the G channel of pixel 1 (0=stop, 1=turn_left).
+        action is the G channel of pixel 1 (0=stop, 1=left, 2=right).
         """
         pixels = self._pixel_reader.read_pixels(self._nav_positions)
         state = None
@@ -223,15 +278,14 @@ class FishingBot:
 
         Bot ALWAYS spams interact (F) every ~100ms during TREASURE_SPAWN.
         Addon controls turning via nav pixel 1:
-          action=1 → hold left (spinning to scan)
-          action=0 → release left (treasure found, click-to-move walking)
+          action=1 → hold left, action=2 → hold right, action=0 → stop
         Addon sets IDLE/NAV when treasure is looted or timed out.
         """
         logger.info("TREASURE SPAWNED — spinning + spamming interact...")
         if self.config.treasure_alarm:
             self._play_treasure_alarm()
 
-        holding_left = False
+        holding_turn: str | None = None
         last_interact = 0.0
         try:
             start = time.monotonic()
@@ -241,9 +295,9 @@ class FishingBot:
                 if state in ("IDLE", "NAV"):
                     logger.info("Treasure done (state=%s).", state)
                     if state == "NAV":
-                        if holding_left:
-                            key_up(self._hwnd, "left")
-                            holding_left = False
+                        if holding_turn:
+                            key_up(self._hwnd, holding_turn)
+                            holding_turn = None
                         self._run_nav()
                     return
 
@@ -252,13 +306,14 @@ class FishingBot:
                     time.sleep(0.1)
                     continue
 
-                # Turn control from addon
-                if action >= 1 and not holding_left:
-                    key_down(self._hwnd, "left")
-                    holding_left = True
-                elif action == 0 and holding_left:
-                    key_up(self._hwnd, "left")
-                    holding_left = False
+                # Turn control from addon: 1=left, 2=right, 0=stop
+                if action >= 1 and not holding_turn:
+                    turn_key = "left" if action == 1 else "right"
+                    key_down(self._hwnd, turn_key)
+                    holding_turn = turn_key
+                elif action == 0 and holding_turn:
+                    key_up(self._hwnd, holding_turn)
+                    holding_turn = None
 
                 # Spam interact every 50ms — catches treasure while spinning,
                 # triggers click-to-move, and loots when in range
@@ -271,8 +326,8 @@ class FishingBot:
 
             logger.warning("Treasure global timeout (200s).")
         finally:
-            if holding_left:
-                key_up(self._hwnd, "left")
+            if holding_turn:
+                key_up(self._hwnd, holding_turn)
 
     # ------------------------------------------------------------------
     # Main loop — pure state machine
@@ -283,6 +338,7 @@ class FishingBot:
         self._init_pixel_reader()
         self.audio.ensure_unmuted()
         self.running = True
+        self._cast_count = 0
 
         if self.config.silent:
             self.audio.set_muted(True)
@@ -325,6 +381,9 @@ class FishingBot:
 
                 elif state in ("SELL_ACTION", "SELL_INTERACT", "SELL_WAIT"):
                     self._handle_sell()
+
+                elif state == "LOGOUT":
+                    self._do_logout()
 
                 else:
                     # TREASURE_TARGET, SPIRIT_SPAWN, CRAB_SPAWN, unknown

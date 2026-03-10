@@ -19,8 +19,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--poll-interval", type=float, default=0.1, help="Seconds between audio checks (default: 0.1)")
     parser.add_argument("--process", default="Wow.exe", help="WoW process name (default: Wow.exe)")
     parser.add_argument("--silent", action="store_true", help="Mute WoW audio for you (bot still detects fish)")
-    parser.add_argument("--humanize", type=float, default=0.0, help="Random jitter on delays, 0.0-1.0 (default: 0.0, recommended: 0.3)")
+    parser.add_argument("--humanize", type=float, default=0.3, help="Random jitter on delays, 0.0-1.0 (default: 0.3)")
     parser.add_argument("--treasure-alarm", action="store_true", help="Play alarm sound when a treasure spawns")
+
+    # Anti-detection
+    parser.add_argument("--afk-chance", type=float, default=0.01, help="Chance of AFK pause per cast, 0.0-1.0 (default: 0.01)")
+    parser.add_argument("--jump-chance", type=float, default=0.03, help="Chance of random jump per cast, 0.0-1.0 (default: 0.03)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
@@ -45,6 +49,8 @@ def main() -> None:
         silent=args.silent,
         humanize=args.humanize,
         treasure_alarm=args.treasure_alarm,
+        afk_chance=args.afk_chance,
+        jump_chance=args.jump_chance,
     )
 
     bot = FishingBot(config)
