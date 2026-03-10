@@ -7,7 +7,7 @@ Pixel layout (set by the addon's navigation.lua):
   Pixel (3,0): Angle          R=degrees_int, G=degrees_frac, B=direction(0=right,1=left)
 
 Steps:  0=IDLE, 1=ROTATE_TO_TARGET, 2=WALK, 3=ROTATE_TO_FACING, 4=DONE
-Actions: 0=NONE, 1=TURN_LEFT, 2=TURN_RIGHT, 3=MOVE_FORWARD
+Actions: 0=NONE, 1=TURN_LEFT, 2=TURN_RIGHT, 3=MOVE_FORWARD, 4=MOVE_BACKWARD
 """
 
 import time
@@ -30,11 +30,13 @@ ACTION_NONE = 0
 ACTION_TURN_LEFT = 1
 ACTION_TURN_RIGHT = 2
 ACTION_MOVE_FORWARD = 3
+ACTION_MOVE_BACKWARD = 4
 
 # Keys
 KEY_LEFT = "left"
 KEY_RIGHT = "right"
 KEY_UP = "up"
+KEY_DOWN = "down"
 
 # Poll interval for reading nav pixels
 NAV_POLL_INTERVAL = 0.05  # 50ms — fast enough for smooth navigation
@@ -135,15 +137,19 @@ class Navigator:
 
                 # Determine which keys to hold based on step + action
                 want_forward = False
+                want_backward = False
                 want_left = False
                 want_right = False
 
                 if step == STEP_WALK:
-                    want_forward = True
-                    if action == ACTION_TURN_LEFT:
-                        want_left = True
-                    elif action == ACTION_TURN_RIGHT:
-                        want_right = True
+                    if action == ACTION_MOVE_BACKWARD:
+                        want_backward = True
+                    else:
+                        want_forward = True
+                        if action == ACTION_TURN_LEFT:
+                            want_left = True
+                        elif action == ACTION_TURN_RIGHT:
+                            want_right = True
 
                 elif step in (STEP_ROTATE_TO_TARGET, STEP_ROTATE_TO_FACING):
                     if action == ACTION_TURN_LEFT:
@@ -154,8 +160,13 @@ class Navigator:
                 # Apply key states
                 if want_forward:
                     self._hold_key(KEY_UP)
+                    self._release_key(KEY_DOWN)
+                elif want_backward:
+                    self._hold_key(KEY_DOWN)
+                    self._release_key(KEY_UP)
                 else:
                     self._release_key(KEY_UP)
+                    self._release_key(KEY_DOWN)
 
                 if want_left:
                     self._hold_key(KEY_LEFT)
@@ -168,7 +179,8 @@ class Navigator:
                     self._release_key(KEY_RIGHT)
 
                 if step == STEP_WALK:
-                    logger.debug("WALK dist=%.1f yds, angle=%.1f°, action=%d", dist, angle_deg, action)
+                    dir_name = "BACKWARD" if action == ACTION_MOVE_BACKWARD else "FORWARD"
+                    logger.debug("WALK %s dist=%.1f yds, angle=%.1f°, action=%d", dir_name, dist, angle_deg, action)
                 else:
                     step_name = {STEP_ROTATE_TO_TARGET: "ROT_TARGET", STEP_ROTATE_TO_FACING: "ROT_FACING"}.get(step, str(step))
                     logger.debug("%s angle=%.1f°, action=%d", step_name, angle_deg, action)
